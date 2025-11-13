@@ -1,0 +1,90 @@
+name: Fun
+
+on:
+  push:
+    branches:
+      - main
+  schedule:
+    # Runs everyday at 1:00 AM
+    - cron: "0 2 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  sync-upstream-build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: config
+        run: |
+          git config --global user.name "fun"
+          git config --global user.email "fun@fun.com"
+
+      - name: add
+        run: git remote add upstream https://github.com/bia-pain-bache/BPB-Worker-Panel.git
+
+      - name: sync
+        run: |
+          git fetch upstream
+          git checkout main
+          git merge upstream/main
+
+      - name: push
+        run: git push origin main
+        env:
+          GITHUB_TOKEN: ${{ secrets.PAT_TOKEN }}
+
+      - name: Install dependencies
+        run: |
+          npm install -g javascript-obfuscator
+
+      - name: Get release version
+        id: get_version
+        run: echo "version=$(jq -r .version package.json)" >> $GITHUB_OUTPUT
+
+      - name: Check release version
+        run: echo "Release version is ${{ steps.get_version.outputs.version }}"
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "latest"
+
+      - name: Install dependencies
+        run: npm install --production
+
+      - name: Type check
+        run: npm run check
+
+      - name: Build project
+        run: npm run build
+
+      - name: Read release note
+        id: read_release
+        shell: bash
+        run: |
+          r=$(cat RELEASE.md)         
+          r="${r//'%'/'%25'}"                               
+          r="${r//$'\n'/'%0A'}"                             
+          r="${r//$'\r'/'%0D'}"                             
+          echo "RELEASE_BODY=$r" >> $GITHUB_OUTPUT
+
+      - name: Upload Release Assets
+        uses: svenstaro/upload-release-action@v2
+        with:
+          repo_token: ${{ secrets.GITHUB_TOKEN }}
+          file: dist/*
+          tag: v${{ steps.get_version.outputs.version }}
+          release_name: Release v${{ steps.get_version.outputs.version }}
+          overwrite: true
+          file_glob: true
+          prerelease: ${{ github.ref != 'refs/heads/main' }}
+          promote: ${{ github.ref == 'refs/heads/main' }}
+          make_latest: ${{ github.ref == 'refs/heads/main' }}
+          body: ${{ steps.read_release.outputs.RELEASE_BODY }}
